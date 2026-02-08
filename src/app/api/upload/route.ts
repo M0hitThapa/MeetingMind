@@ -48,7 +48,7 @@ export async function POST(request: NextRequest) {
     const pathname = `uploads/${timestamp}-${sanitizedName}`;
 
     
-    const blob = await put(pathname, file.stream(), {
+    const blob = await put(pathname, file, {
       access: 'public',
       addRandomSuffix: false,
       contentType: file.type,
