@@ -1,0 +1,258 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+
+model Meeting {
+  id              String   @id @default(cuid())
+  title           String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  // File storage
+  audioUrl        String?
+  fileType        String   // 'audio' | 'video'
+  hasVideo        Boolean  @default(false)
+  videoMetadata   Json?    // { width, height, duration, thumbnailUrl }
+  
+  // Processing status
+  status          String   @default("pending") // pending, uploading, transcribing, analyzing, completed, error
+  progress        Int      @default(0) // 0-100
+  
+  // Transcription data
+  transcript      String?  @db.Text
+  speakers        Json?    // [{ id, name, speakingTime, segments }]
+  chapters        Json?    // AssemblyAI chapters
+  duration        Int?     // seconds
+  
+  // AI Analysis
+  summary         String?  @db.Text
+  decisions       Json?    // [{ id, text, owner, confidence, timestamp }]
+  actionItems     Json?    // [{ id, text, assignee, dueDate, priority, completed }]
+  topics          Json?    // [{ name, relevance, occurrences }]
+  nextSteps       Json?    // [{ text, priority, timeframe }]
+  
+  // Enhanced analysis
+  risks           Json?    // [{ level: 'low'|'medium'|'high', description, mitigation }]
+  sentiment       Json?    // { overall: 'positive'|'neutral'|'negative', timeline: [...] }
+  keyMoments      Json?    // [{ type, timestamp, description, importance }]
+  
+  // Relations
+  queries         Query[]
+  followUps       FollowUp[]
+  tasks           Task[]
+  flashcards      Flashcard[]
+  chatSessions    ChatSession[]
+  
+  @@index([status])
+  @@index([createdAt])
+  @@map("meetings")
+}
+
+model ChatSession {
+  id          String   @id @default(cuid())
+  meetingId   String
+  userId      String?
+  title       String?  // Auto-generated from first user message
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  meeting     Meeting  @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  queries     Query[]
+  
+  @@index([meetingId])
+  @@index([userId])
+  @@index([updatedAt])
+  @@map("chat_sessions")
+}
+
+model Query {
+  id              String   @id @default(cuid())
+  chatSessionId   String
+  meetingId       String
+  userId          String?  // Anonymous user ID from cookie for chat history isolation
+  query           String   @db.Text
+  response        Json     // { answer: string, components: [...], suggestedFollowUps: [...] }
+  components      Json?    // Component configuration array
+  voiceInput      Boolean  @default(false)
+  createdAt       DateTime @default(now())
+  
+  chatSession     ChatSession @relation(fields: [chatSessionId], references: [id], onDelete: Cascade)
+  meeting         Meeting     @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  
+  @@index([chatSessionId])
+  @@index([meetingId])
+  @@index([userId])
+  @@map("queries")
+}
+
+model FollowUp {
+  id              String   @id @default(cuid())
+  meetingId       String
+  actionItemId    String   
+  type            String   
+  recipient       String?  
+  status          String   @default("pending") 
+  scheduledFor    DateTime?
+  sentAt          DateTime?
+  metadata        Json?    
+  createdAt       DateTime @default(now())
+  
+  meeting         Meeting  @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  
+  @@index([meetingId])
+  @@index([status])
+  @@index([scheduledFor])
+  @@map("follow_ups")
+}
+
+model Task {
+  id              String   @id @default(cuid())
+  meetingId       String
+  actionItemId    String?  
+  
+
+  title           String
+  description     String?  @db.Text
+  status          String   @default("todo")
+  priority        String   @default("medium") 
+  
+
+  owner           String?  
+  delegatedTo     String?  
+  
+
+  dueDate         DateTime?
+  scheduledFor    DateTime? 
+  completedAt     DateTime?
+  estimatedHours  Float?
+  actualHours     Float?
+  
+  // Organization
+  category        String?  
+  tags            String[]
+  project         String?
+  
+  // Dependencies
+  blockedBy       String[] 
+  blocking        String[] 
+  
+  // Context
+  context         String?  @db.Text 
+  energyLevel     String?  
+  
+  // Relations
+  meeting         Meeting  @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  parentTaskId    String?
+  parentTask      Task?    @relation("Subtasks", fields: [parentTaskId], references: [id])
+  subtasks        Task[]   @relation("Subtasks")
+  
+  @@index([owner])
+  @@index([status])
+  @@index([dueDate])
+  @@index([priority])
+  @@index([meetingId])
+  @@map("tasks")
+}
+
+model Flashcard {
+  id              String   @id @default(cuid())
+  meetingId       String
+  deckId          String?
+  
+  // Card content
+  cardType        String  
+  question        String   @db.Text
+  answer          String   @db.Text
+  context         String?  @db.Text 
+  
+
+  options         String[]
+  correctOption   Int?     
+  
+ 
+  clozeText       String?  @db.Text 
+  
+  
+  category        String?
+  tags            String[]
+  importance      Int      @default(3) 
+  difficulty      Int      @default(3) 
+  
+  
+  easeFactor      Float    @default(2.5)
+  interval        Int      @default(0) // Days
+  repetitions     Int      @default(0)
+  nextReview      DateTime @default(now())
+  lastReviewed    DateTime?
+  
+  // Performance tracking
+  timesReviewed   Int      @default(0)
+  timesCorrect    Int      @default(0)
+  averageTime     Float?   // Seconds
+  
+  // Relations
+  meeting         Meeting  @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  deck            FlashcardDeck? @relation(fields: [deckId], references: [id])
+  reviews         FlashcardReview[]
+  
+  @@index([nextReview])
+  @@index([meetingId])
+  @@index([deckId])
+  @@map("flashcards")
+}
+
+model FlashcardDeck {
+  id              String   @id @default(cuid())
+  name            String
+  description     String?  @db.Text
+  color           String?  // Hex color
+  icon            String?  // Lucide icon name
+  
+  // Study settings
+  newCardsPerDay  Int      @default(20)
+  reviewLimit     Int      @default(100)
+  
+  // Stats
+  totalCards      Int      @default(0)
+  matureCards     Int      @default(0) 
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  // Relations
+  cards           Flashcard[]
+  
+  @@map("flashcard_decks")
+}
+
+model FlashcardReview {
+  id              String   @id @default(cuid())
+  flashcardId     String
+  
+
+  rating          Int      
+  timeSpent       Int      
+  wasCorrect      Boolean
+  previousInterval Int
+  previousEase    Float
+  
+  reviewedAt      DateTime @default(now())
+  
+  flashcard       Flashcard @relation(fields: [flashcardId], references: [id], onDelete: Cascade)
+  
+  @@index([flashcardId])
+  @@index([reviewedAt])
+  @@map("flashcard_reviews")
+}
